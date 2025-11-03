@@ -11,15 +11,15 @@ import pandas as pd
 # --- 기본 상수 및 파라미터 ---
 STP_MOLAR_VOLUME = 22414.0 # cm³/mol
 
-# [NEW] 단위 환산 계수
+# 단위 환산 계수
 BAR_TO_ATM = 0.986923
 ATM_TO_BAR = 1.01325
 M3H_TO_CM3S = 1_000_000.0 / 3600.0 # 1 m³/h = 277.77... cm³/s
 CM3S_TO_M3H = 3600.0 / 1_000_000.0 # 1 cm³/s = 0.0036 m³/h
-M2_TO_CM2 = 10000.0                # [NEW] 1 m² = 10000 cm²
-CM2_TO_M2 = 1.0 / M2_TO_CM2        # [NEW] 1 cm² = 0.0001 m²
+M2_TO_CM2 = 10000.0                # 1 m² = 10000 cm²
+CM2_TO_M2 = 1.0 / M2_TO_CM2        # 1 cm² = 0.0001 m²
 
-# [MODIFIED] UI 기본값을 bar, m³/h, m² 기준으로 변경
+# UI 기본값
 PROCESS_PARAMS_VOL = {
     "P": np.array([0.073e-12, 0.2178e-12, 0.2178e-12]), # (cm³·cm)/(cm²·s·atm)
     "delta": 0.2e-6, 
@@ -27,8 +27,11 @@ PROCESS_PARAMS_VOL = {
     "p_p_default": 1.013, # (bar) 1 atm
 }
 RAW_FEED_FLUX_M3H = 0.54 # (m³/h) 150 cm³/s
-RAW_FEED_COMP = np.array([0.79, 0.11, 0.10]) # 3성분 기준
-AREA_LIST_M2 = [5.0, 5.0, 5.0, 5.0] # [MODIFIED] 4스테이지 기준 (m²)
+
+# [MODIFIED] N2, O2, CO2 순서에 맞게 기본 조성 변경
+RAW_FEED_COMP = np.array([0.807, 0.107, 0.086]) # 3성분 기준 (N2, O2, CO2 순서)
+
+AREA_LIST_M2 = [5.0, 5.0, 5.0, 5.0] # 4스테이지 기준 (m²)
 
 # ==================================================================
 # 2. MembraneStage 클래스 (수정 없음)
@@ -251,6 +254,7 @@ with st.sidebar:
     feed_flux_m3h = st.number_input("총 유량 (m³/h)", value=RAW_FEED_FLUX_M3H, format="%.2f")
     
     st.subheader("초기 조성 (몰분율)")
+    # [MODIFIED] 변경된 기본값 (RAW_FEED_COMP)이 여기에 적용됨
     comp_1 = st.number_input(f"{COMP_NAMES_FIXED[0]} (Comp 1)", value=RAW_FEED_COMP[0], format="%.4f")
     comp_2 = st.number_input(f"{COMP_NAMES_FIXED[1]} (Comp 2)", value=RAW_FEED_COMP[1], format="%.4f")
     comp_3 = st.number_input(f"{COMP_NAMES_FIXED[2]} (Comp 3)", value=RAW_FEED_COMP[2], format="%.4f")
@@ -260,7 +264,7 @@ with st.sidebar:
     p_u_default = PROCESS_PARAMS_VOL["p_u_default"]
     p_p_default = PROCESS_PARAMS_VOL["p_p_default"]
     
-    # [MODIFIED] Area 단위 m²로 변경
+    # Area 단위 m²로 변경
     # Stage 1
     st.subheader("Stage 1")
     area_1 = st.number_input("S1 Area (m²)", value=AREA_LIST_M2[0], format="%.4f", key="a1")
@@ -295,7 +299,6 @@ if run_button:
         # --- 1. 입력값 파싱 ---
         main_area.subheader("1. 입력값 파싱 중...")
         
-        # [MODIFIED] m²로 입력받은 Area 리스트
         area_list_in_m2 = [area_1, area_2, area_3, area_4] 
         p_u_list_bar = [p_u_1, p_u_2, p_u_3, p_u_4]
         p_p_list_bar = [p_p_1, p_p_2, p_p_3, p_p_4]
@@ -332,7 +335,6 @@ if run_button:
             }
             process_params_list_mol.append(stage_params)
         
-        # [NEW] m² -> cm² 환산
         area_list_in_cm2 = [a * M2_TO_CM2 for a in area_list_in_m2]
         
         raw_feed_flux_cm3s = feed_flux_m3h * M3H_TO_CM3S
@@ -341,7 +343,6 @@ if run_button:
         # --- 3. 시뮬레이션 실행 ---
         main_area.subheader("2. ⚙️ 시뮬레이션 실행 (재활용 루프)")
         
-        # [MODIFIED] Process 객체에 cm² 단위의 area list 전달
         membrane_process = Process(process_params_list_mol, area_list_in_cm2, stp_molar_volume=STP_MOLAR_VOLUME)
         
         success = membrane_process.run_with_recycle(
@@ -361,7 +362,7 @@ if run_button:
                 
                 stage_data = {
                     "Stage": stage.name,
-                    "Area (m²)": stage.area * CM2_TO_M2, # [MODIFIED] cm² -> m² 환산
+                    "Area (m²)": stage.area * CM2_TO_M2,
                     "p_u (bar)": p_u_list_bar[stage_idx], 
                     "p_p (bar)": p_p_list_bar[stage_idx], 
                     "Stage Cut (θ)": stage.stage_cut,
@@ -383,7 +384,6 @@ if run_button:
             
             df = pd.DataFrame(results_data)
             
-            # [MODIFIED] 포맷터 레이블 및 형식 변경
             formatters = {
                 "Area (m²)": "{:.4f}", 
                 "p_u (bar)": "{:.2f}", 
