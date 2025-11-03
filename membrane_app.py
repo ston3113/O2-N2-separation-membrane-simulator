@@ -16,8 +16,10 @@ BAR_TO_ATM = 0.986923
 ATM_TO_BAR = 1.01325
 M3H_TO_CM3S = 1_000_000.0 / 3600.0 # 1 m³/h = 277.77... cm³/s
 CM3S_TO_M3H = 3600.0 / 1_000_000.0 # 1 cm³/s = 0.0036 m³/h
+M2_TO_CM2 = 10000.0                # [NEW] 1 m² = 10000 cm²
+CM2_TO_M2 = 1.0 / M2_TO_CM2        # [NEW] 1 cm² = 0.0001 m²
 
-# [MODIFIED] UI 기본값을 bar, m³/h 기준으로 변경
+# [MODIFIED] UI 기본값을 bar, m³/h, m² 기준으로 변경
 PROCESS_PARAMS_VOL = {
     "P": np.array([0.073e-12, 0.2178e-12, 0.2178e-12]), # (cm³·cm)/(cm²·s·atm)
     "delta": 0.2e-6, 
@@ -26,11 +28,11 @@ PROCESS_PARAMS_VOL = {
 }
 RAW_FEED_FLUX_M3H = 0.54 # (m³/h) 150 cm³/s
 RAW_FEED_COMP = np.array([0.79, 0.11, 0.10]) # 3성분 기준
-AREA_LIST = [50000.0, 50000.0, 50000.0, 50000.0] # 4스테이지 기준
+AREA_LIST_M2 = [5.0, 5.0, 5.0, 5.0] # [MODIFIED] 4스테이지 기준 (m²)
 
 # ==================================================================
 # 2. MembraneStage 클래스 (수정 없음)
-# (내부 계산은 모두 atm, cm³/s, mol/s 기준으로 수행됨)
+# (내부 계산은 모두 atm, cm³/s, cm² 기준으로 수행됨)
 # ==================================================================
 class MembraneStage:
     """
@@ -134,13 +136,11 @@ class MembraneStage:
         return True
 
 # ==================================================================
-# 3. Process 클래스 (수정됨)
+# 3. Process 클래스 (수정 없음)
 # ==================================================================
 class Process:
-    # [MODIFIED] params 대신 params_list를 받도록 수정
     def __init__(self, params_list, area_list, stp_molar_volume=22414.0):
-        # self.params = params # <-- OLD
-        self.params_list = params_list # <-- NEW
+        self.params_list = params_list
         self.area_list = area_list
         self.stages = []
         self.stp_molar_volume = stp_molar_volume
@@ -189,8 +189,6 @@ class Process:
                     
                 for j, area_target in enumerate(self.area_list):
                     stage = MembraneStage(f"Stage-{j+1}")
-                    
-                    # [MODIFIED] self.params 대신 해당 스테이지의 파라미터(self.params_list[j])를 전달
                     stage_params = self.params_list[j]
                     stage.run(current_feed_flux, current_feed_comp, area_target, stage_params)
                     
@@ -244,13 +242,12 @@ with st.sidebar:
     delta = st.number_input("막 두께 (delta, cm)", value=PROCESS_PARAMS_VOL["delta"], format="%.2e")
     
     st.subheader("막 투과도 (P)")
-    st.caption(f"단위: (cm³·cm)/(cm²·s·atm)") # [NEW] P 단위 명시
+    st.caption(f"단위: (cm³·cm)/(cm²·s·atm)")
     p_1 = st.number_input(f"P for {COMP_NAMES_FIXED[0]}", value=PROCESS_PARAMS_VOL["P"][0], format="%.4e")
     p_2 = st.number_input(f"P for {COMP_NAMES_FIXED[1]}", value=PROCESS_PARAMS_VOL["P"][1], format="%.4e")
     p_3 = st.number_input(f"P for {COMP_NAMES_FIXED[2]}", value=PROCESS_PARAMS_VOL["P"][2], format="%.4e")
 
     st.header("2. 초기 원료 (Raw Feed)")
-    # [MODIFIED] 유량 단위 m³/h로 변경
     feed_flux_m3h = st.number_input("총 유량 (m³/h)", value=RAW_FEED_FLUX_M3H, format="%.2f")
     
     st.subheader("초기 조성 (몰분율)")
@@ -260,32 +257,31 @@ with st.sidebar:
 
     st.header("3. 스테이지별 파라미터")
     
-    # [MODIFIED] 압력 기본값 bar 단위로
     p_u_default = PROCESS_PARAMS_VOL["p_u_default"]
     p_p_default = PROCESS_PARAMS_VOL["p_p_default"]
     
-    # [MODIFIED] 압력 단위 bar로 변경
+    # [MODIFIED] Area 단위 m²로 변경
     # Stage 1
     st.subheader("Stage 1")
-    area_1 = st.number_input("S1 Area (cm²)", value=AREA_LIST[0], format="%.2f", key="a1")
+    area_1 = st.number_input("S1 Area (m²)", value=AREA_LIST_M2[0], format="%.4f", key="a1")
     p_u_1 = st.number_input("S1 Upstream (p_u, bar)", value=p_u_default, key="pu1")
     p_p_1 = st.number_input("S1 Permeate (p_p, bar)", value=p_p_default, key="pp1")
     
     # Stage 2
     st.subheader("Stage 2")
-    area_2 = st.number_input("S2 Area (cm²)", value=AREA_LIST[1], format="%.2f", key="a2")
+    area_2 = st.number_input("S2 Area (m²)", value=AREA_LIST_M2[1], format="%.4f", key="a2")
     p_u_2 = st.number_input("S2 Upstream (p_u, bar)", value=p_u_default, key="pu2")
     p_p_2 = st.number_input("S2 Permeate (p_p, bar)", value=p_p_default, key="pp2")
 
     # Stage 3
     st.subheader("Stage 3")
-    area_3 = st.number_input("S3 Area (cm²)", value=AREA_LIST[2], format="%.2f", key="a3")
+    area_3 = st.number_input("S3 Area (m²)", value=AREA_LIST_M2[2], format="%.4f", key="a3")
     p_u_3 = st.number_input("S3 Upstream (p_u, bar)", value=p_u_default, key="pu3")
     p_p_3 = st.number_input("S3 Permeate (p_p, bar)", value=p_p_default, key="pp3")
 
     # Stage 4
     st.subheader("Stage 4")
-    area_4 = st.number_input("S4 Area (cm²)", value=AREA_LIST[3], format="%.2f", key="a4")
+    area_4 = st.number_input("S4 Area (m²)", value=AREA_LIST_M2[3], format="%.4f", key="a4")
     p_u_4 = st.number_input("S4 Upstream (p_u, bar)", value=p_u_default, key="pu4")
     p_p_4 = st.number_input("S4 Permeate (p_p, bar)", value=p_p_default, key="pp4")
 
@@ -299,9 +295,10 @@ if run_button:
         # --- 1. 입력값 파싱 ---
         main_area.subheader("1. 입력값 파싱 중...")
         
-        area_list_in = [area_1, area_2, area_3, area_4]
-        p_u_list_bar = [p_u_1, p_u_2, p_u_3, p_u_4] # [NEW] bar 단위 리스트
-        p_p_list_bar = [p_p_1, p_p_2, p_p_3, p_p_4] # [NEW] bar 단위 리스트
+        # [MODIFIED] m²로 입력받은 Area 리스트
+        area_list_in_m2 = [area_1, area_2, area_3, area_4] 
+        p_u_list_bar = [p_u_1, p_u_2, p_u_3, p_u_4]
+        p_p_list_bar = [p_p_1, p_p_2, p_p_3, p_p_4]
         
         p_in = np.array([p_1, p_2, p_3])
         raw_feed_comp_in = np.array([comp_1, comp_2, comp_3])
@@ -330,19 +327,22 @@ if run_button:
             stage_params = {
                 "P": p_mol,
                 "delta": delta_in,
-                "p_u": p_u_list_bar[i] * BAR_TO_ATM,  # [MODIFIED] bar -> atm 환산
-                "p_p": p_p_list_bar[i] * BAR_TO_ATM,  # [MODIFIED] bar -> atm 환산
+                "p_u": p_u_list_bar[i] * BAR_TO_ATM,  # bar -> atm 환산
+                "p_p": p_p_list_bar[i] * BAR_TO_ATM,  # bar -> atm 환산
             }
             process_params_list_mol.append(stage_params)
         
-        # [MODIFIED] m³/h -> cm³/s -> mol/s 환산
+        # [NEW] m² -> cm² 환산
+        area_list_in_cm2 = [a * M2_TO_CM2 for a in area_list_in_m2]
+        
         raw_feed_flux_cm3s = feed_flux_m3h * M3H_TO_CM3S
         raw_feed_flux_mol = raw_feed_flux_cm3s / STP_MOLAR_VOLUME
 
         # --- 3. 시뮬레이션 실행 ---
         main_area.subheader("2. ⚙️ 시뮬레이션 실행 (재활용 루프)")
         
-        membrane_process = Process(process_params_list_mol, area_list_in, stp_molar_volume=STP_MOLAR_VOLUME)
+        # [MODIFIED] Process 객체에 cm² 단위의 area list 전달
+        membrane_process = Process(process_params_list_mol, area_list_in_cm2, stp_molar_volume=STP_MOLAR_VOLUME)
         
         success = membrane_process.run_with_recycle(
             raw_feed_flux=raw_feed_flux_mol,
@@ -352,7 +352,6 @@ if run_button:
         # --- 4. 최종 결과 표시 (테이블 형식) ---
         if success:
             main_area.subheader("3. 🏁 최종 수렴 결과")
-            # [MODIFIED] mol/s -> m³/h 로 환산하는 계수
             vol_conv_mols_to_m3h = membrane_process.stp_molar_volume * CM3S_TO_M3H
             
             results_data = [] 
@@ -362,21 +361,21 @@ if run_button:
                 
                 stage_data = {
                     "Stage": stage.name,
-                    "Area (cm²)": stage.area,
-                    "p_u (bar)": p_u_list_bar[stage_idx], # [MODIFIED] bar 단위 값 표시
-                    "p_p (bar)": p_p_list_bar[stage_idx], # [MODIFIED] bar 단위 값 표시
+                    "Area (m²)": stage.area * CM2_TO_M2, # [MODIFIED] cm² -> m² 환산
+                    "p_u (bar)": p_u_list_bar[stage_idx], 
+                    "p_p (bar)": p_p_list_bar[stage_idx], 
                     "Stage Cut (θ)": stage.stage_cut,
-                    "Feed Flux (m³/h)": stage.feed_flux * vol_conv_mols_to_m3h, # [MODIFIED] m³/h
+                    "Feed Flux (m³/h)": stage.feed_flux * vol_conv_mols_to_m3h, 
                 }
                 
                 for i, name in enumerate(comp_names_in):
                     stage_data[f"Feed {name}"] = stage.feed_comp[i]
                 
-                stage_data["Permeate Flux (m³/h)"] = stage.permeate_flux * vol_conv_mols_to_m3h # [MODIFIED] m³/h
+                stage_data["Permeate Flux (m³/h)"] = stage.permeate_flux * vol_conv_mols_to_m3h 
                 for i, name in enumerate(comp_names_in):
                     stage_data[f"Permeate {name}"] = stage.permeate_comp[i]
 
-                stage_data["Retentate Flux (m³/h)"] = stage.retentate_flux * vol_conv_mols_to_m3h # [MODIFIED] m³/h
+                stage_data["Retentate Flux (m³/h)"] = stage.retentate_flux * vol_conv_mols_to_m3h 
                 for i, name in enumerate(comp_names_in):
                     stage_data[f"Retentate {name}"] = stage.retentate_comp[i]
                 
@@ -384,9 +383,9 @@ if run_button:
             
             df = pd.DataFrame(results_data)
             
-            # [MODIFIED] 포맷터 레이블 변경
+            # [MODIFIED] 포맷터 레이블 및 형식 변경
             formatters = {
-                "Area (cm²)": "{:.2f}",
+                "Area (m²)": "{:.4f}", 
                 "p_u (bar)": "{:.2f}", 
                 "p_p (bar)": "{:.2f}", 
                 "Stage Cut (θ)": "{:.4f}",
