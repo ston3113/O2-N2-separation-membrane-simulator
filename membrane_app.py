@@ -11,11 +11,12 @@ import pandas as pd
 # --- 기본 상수 및 파라미터 ---
 STP_MOLAR_VOLUME = 22414.0
 
+# [MODIFIED] 전역 p_u, p_p 제거. (기본값으로만 사용)
 PROCESS_PARAMS_VOL = {
     "P": np.array([0.073e-12, 0.2178e-12, 0.2178e-12]), 
-    "p_u": 10.0,
-    "p_p": 1.0, 
     "delta": 0.2e-6, 
+    "p_u_default": 10.0, # 스테이지별 UI의 기본값으로 사용
+    "p_p_default": 1.0,  # 스테이지별 UI의 기본값으로 사용
 }
 RAW_FEED_FLUX_VOL = 150 
 RAW_FEED_COMP = np.array([0.79, 0.11, 0.10]) # 3성분 기준
@@ -126,11 +127,13 @@ class MembraneStage:
         return True
 
 # ==================================================================
-# 3. Process 클래스 (수정 없음)
+# 3. Process 클래스 (수정됨)
 # ==================================================================
 class Process:
-    def __init__(self, params, area_list, stp_molar_volume=22414.0):
-        self.params = params
+    # [MODIFIED] params 대신 params_list를 받도록 수정
+    def __init__(self, params_list, area_list, stp_molar_volume=22414.0):
+        # self.params = params # <-- OLD
+        self.params_list = params_list # <-- NEW
         self.area_list = area_list
         self.stages = []
         self.stp_molar_volume = stp_molar_volume
@@ -174,13 +177,16 @@ class Process:
             
             current_stages = []
             try:
-                # [MODIFIED] area_list의 갯수만큼 stage를 동적으로 실행
                 if len(self.area_list) < 4:
                     raise ValueError("Area 리스트는 최소 4개여야 합니다 (현재 4-stage 재활용 로직).")
                     
                 for j, area_target in enumerate(self.area_list):
                     stage = MembraneStage(f"Stage-{j+1}")
-                    stage.run(current_feed_flux, current_feed_comp, area_target, self.params)
+                    
+                    # [MODIFIED] self.params 대신 해당 스테이지의 파라미터(self.params_list[j])를 전달
+                    stage_params = self.params_list[j]
+                    stage.run(current_feed_flux, current_feed_comp, area_target, stage_params)
+                    
                     current_stages.append(stage)
                     current_feed_flux = stage.permeate_flux
                     current_feed_comp = stage.permeate_comp
@@ -189,7 +195,6 @@ class Process:
                 self.log_widget.text(log_output)
                 return False 
 
-            # (참고: 재활용 로직이 Stage 3, 4 잔류물을 사용하도록 하드코딩 되어있음)
             new_ret_3 = {'flux': current_stages[2].retentate_flux, 'comp': current_stages[2].retentate_comp}
             new_ret_4 = {'flux': current_stages[3].retentate_flux, 'comp': current_stages[3].retentate_comp}
 
@@ -217,7 +222,7 @@ class Process:
         return False
 
 # ==================================================================
-# 4. Streamlit UI 및 실행 로직 (Area List 입력 수정)
+# 4. Streamlit UI 및 실행 로직 (스테이지별 압력 입력)
 # ==================================================================
 
 st.set_page_config(layout="wide")
@@ -228,9 +233,10 @@ COMP_NAMES_FIXED = ['N2', 'O2', 'CO2']
 
 # --- 입력창 (사이드바) ---
 with st.sidebar:
-    st.header("1. 공정 파라미터")
-    p_u = st.number_input("공급측 압력 (p_u, atm)", value=PROCESS_PARAMS_VOL["p_u"])
-    p_p = st.number_input("투과측 압력 (p_p, atm)", value=PROCESS_PARAMS_VOL["p_p"])
+    st.header("1. 공정 파라미터 (공통)")
+    # [REMOVED] 전역 p_u, p_p 입력창 제거
+    # p_u = st.number_input("공급측 압력 (p_u, atm)", value=PROCESS_PARAMS_VOL["p_u"])
+    # p_p = st.number_input("투과측 압력 (p_p, atm)", value=PROCESS_PARAMS_VOL["p_p"])
     delta = st.number_input("막 두께 (delta, cm)", value=PROCESS_PARAMS_VOL["delta"], format="%.2e")
     
     st.subheader("막 투과도 (P)")
@@ -246,14 +252,36 @@ with st.sidebar:
     comp_2 = st.number_input(f"{COMP_NAMES_FIXED[1]} (Comp 2)", value=RAW_FEED_COMP[1], format="%.4f")
     comp_3 = st.number_input(f"{COMP_NAMES_FIXED[2]} (Comp 3)", value=RAW_FEED_COMP[2], format="%.4f")
 
-    # --- [MODIFIED] Area List 입력을 개별 입력창으로 변경 ---
-    st.header("3. 스테이지별 막 면적 (Area List)")
-    # (현재 4-stage 재활용 로직에 맞춰 4개 입력창)
-    area_1 = st.number_input("Stage 1 Area (cm²)", value=AREA_LIST[0], format="%.2f")
-    area_2 = st.number_input("Stage 2 Area (cm²)", value=AREA_LIST[1], format="%.2f")
-    area_3 = st.number_input("Stage 3 Area (cm²)", value=AREA_LIST[2], format="%.2f")
-    area_4 = st.number_input("Stage 4 Area (cm²)", value=AREA_LIST[3], format="%.2f")
-    # area_list_str = st.text_input("막 면적 리스트 (콤마 구분, cm²)", value=", ".join(map(str, AREA_LIST))) # <-- OLD
+    # --- [MODIFIED] 스테이지별 Area 및 Pressure 입력 ---
+    st.header("3. 스테이지별 파라미터")
+    
+    # 기본값 변수
+    p_u_default = PROCESS_PARAMS_VOL["p_u_default"]
+    p_p_default = PROCESS_PARAMS_VOL["p_p_default"]
+    
+    # Stage 1
+    st.subheader("Stage 1")
+    area_1 = st.number_input("S1 Area (cm²)", value=AREA_LIST[0], format="%.2f", key="a1")
+    p_u_1 = st.number_input("S1 Upstream (p_u, atm)", value=p_u_default, key="pu1")
+    p_p_1 = st.number_input("S1 Permeate (p_p, atm)", value=p_p_default, key="pp1")
+    
+    # Stage 2
+    st.subheader("Stage 2")
+    area_2 = st.number_input("S2 Area (cm²)", value=AREA_LIST[1], format="%.2f", key="a2")
+    p_u_2 = st.number_input("S2 Upstream (p_u, atm)", value=p_u_default, key="pu2")
+    p_p_2 = st.number_input("S2 Permeate (p_p, atm)", value=p_p_default, key="pp2")
+
+    # Stage 3
+    st.subheader("Stage 3")
+    area_3 = st.number_input("S3 Area (cm²)", value=AREA_LIST[2], format="%.2f", key="a3")
+    p_u_3 = st.number_input("S3 Upstream (p_u, atm)", value=p_u_default, key="pu3")
+    p_p_3 = st.number_input("S3 Permeate (p_p, atm)", value=p_p_default, key="pp3")
+
+    # Stage 4
+    st.subheader("Stage 4")
+    area_4 = st.number_input("S4 Area (cm²)", value=AREA_LIST[3], format="%.2f", key="a4")
+    p_u_4 = st.number_input("S4 Upstream (p_u, atm)", value=p_u_default, key="pu4")
+    p_p_4 = st.number_input("S4 Permeate (p_p, atm)", value=p_p_default, key="pp4")
     # ----------------------------------------------------
 
     run_button = st.button("🚀 시뮬레이션 실행")
@@ -266,10 +294,7 @@ if run_button:
         # --- 1. 입력값 파싱 ---
         main_area.subheader("1. 입력값 파싱 중...")
         
-        # [MODIFIED] 개별 입력창에서 Area 값을 받아 리스트 생성
         area_list_in = [area_1, area_2, area_3, area_4]
-        # area_list_in = [float(x.strip()) for x in area_list_str.split(',')] # <-- OLD
-        # ----------------------------------------------------
         
         p_in = np.array([p_1, p_2, p_3])
         raw_feed_comp_in = np.array([comp_1, comp_2, comp_3])
@@ -289,22 +314,32 @@ if run_button:
         main_area.success("입력값 파싱 완료.")
 
         # --- 2. 파라미터 준비 ---
-        current_process_params = {
-            "P": p_in,
-            "p_u": p_u,
-            "p_p": p_p,
-            "delta": delta,
-        }
+        # [MODIFIED] 스테이지별 파라미터 리스트 생성
         
-        process_params_mol = current_process_params.copy()
-        process_params_mol["P"] = current_process_params["P"] / STP_MOLAR_VOLUME
+        process_params_list_mol = []
+        p_u_list = [p_u_1, p_u_2, p_u_3, p_u_4]
+        p_p_list = [p_p_1, p_p_2, p_p_3, p_p_4]
+        
+        # 공통 파라미터 (P, delta)
+        p_mol = p_in / STP_MOLAR_VOLUME
+        delta_in = delta # 사이드바에서 입력받은 delta 값
+        
+        for i in range(4): # 4-stage 기준
+            stage_params = {
+                "P": p_mol,
+                "delta": delta_in,
+                "p_u": p_u_list[i],  # 해당 스테이지의 p_u
+                "p_p": p_p_list[i],  # 해당 스테이지의 p_p
+            }
+            process_params_list_mol.append(stage_params)
         
         raw_feed_flux_mol = feed_flux_vol / STP_MOLAR_VOLUME
 
         # --- 3. 시뮬레이션 실행 ---
         main_area.subheader("2. ⚙️ 시뮬레이션 실행 (재활용 루프)")
         
-        membrane_process = Process(process_params_mol, area_list_in, stp_molar_volume=STP_MOLAR_VOLUME)
+        # [MODIFIED] Process 객체에 params_list 전달
+        membrane_process = Process(process_params_list_mol, area_list_in, stp_molar_volume=STP_MOLAR_VOLUME)
         
         success = membrane_process.run_with_recycle(
             raw_feed_flux=raw_feed_flux_mol,
@@ -319,9 +354,16 @@ if run_button:
             results_data = [] 
             
             for stage in membrane_process.stages:
+                # [NEW] 결과 테이블에 p_u, p_p 값 추가
+                # (stage 객체는 params를 저장하지 않으므로, process 객체에서 가져와야 함)
+                stage_idx = int(stage.name.split('-')[-1]) - 1 # Stage-1 -> 0
+                stage_params = membrane_process.params_list[stage_idx]
+                
                 stage_data = {
                     "Stage": stage.name,
                     "Area (cm²)": stage.area,
+                    "p_u (atm)": stage_params['p_u'], # [NEW]
+                    "p_p (atm)": stage_params['p_p'], # [NEW]
                     "Stage Cut (θ)": stage.stage_cut,
                     "Feed Flux (cm³/s)": stage.feed_flux * vol_conv,
                 }
@@ -343,6 +385,8 @@ if run_button:
             
             formatters = {
                 "Area (cm²)": "{:.2f}",
+                "p_u (atm)": "{:.2f}", # [NEW]
+                "p_p (atm)": "{:.2f}", # [NEW]
                 "Stage Cut (θ)": "{:.4f}",
                 "Feed Flux (cm³/s)": "{:.2f}",
                 "Permeate Flux (cm³/s)": "{:.2f}",
@@ -351,7 +395,7 @@ if run_button:
             for name in comp_names_in:
                 formatters[f"Feed {name}"] = "{:.4f}"
                 formatters[f"Permeate {name}"] = "{:.4f}"
-                formatters[f"Retentate {name}"] = "{:.4f}" # [FIXED] 오타 수정
+                formatters[f"Retentate {name}"] = "{:.4f}" 
 
             main_area.dataframe(df.style.format(formatters), use_container_width=True)
 
@@ -361,3 +405,4 @@ if run_button:
     except Exception as e:
         st.error(f"스크립트 실행 중 오류가 발생했습니다:")
         st.exception(e)
+        
