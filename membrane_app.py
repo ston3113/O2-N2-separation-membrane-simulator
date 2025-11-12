@@ -26,7 +26,7 @@ PROCESS_PARAMS_VOL = {
     "p_u_default": 10.13, # (bar) 10 atm
     "p_p_default": 1.013, # (bar) 1 atm
 }
-RAW_FEED_FLUX_M3H = 0.54 # (m³/h) 150 cm³/s
+RAW_FEED_FLUX_M3H = 300 # (m³/h) 150 cm³/s
 
 # [MODIFIED] N2, O2, CO2 순서에 맞게 기본 조성 변경
 RAW_FEED_COMP = np.array([0.807, 0.107, 0.086]) # 3성분 기준 (N2, O2, CO2 순서)
@@ -406,3 +406,4 @@ if run_button:
     except Exception as e:
         st.error(f"스크립트 실행 중 오류가 발생했습니다:")
         st.exception(e)
+
