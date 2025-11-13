@@ -23,15 +23,15 @@ CM2_TO_M2 = 1.0 / M2_TO_CM2        # 1 cm² = 0.0001 m²
 PROCESS_PARAMS_VOL = {
     "P": np.array([0.073e-12, 0.2178e-12, 0.2178e-12]), # (cm³·cm)/(cm²·s·atm)
     "delta": 0.2e-6, 
-    "p_u_default": 10.13, # (bar) 10 atm
-    "p_p_default": 1.013, # (bar) 1 atm
+    "p_u_default": 1.00, # (bar) 10 atm
+    "p_p_default": 1.00, # (bar) 1 atm
 }
-RAW_FEED_FLUX_M3H = 300 # (m³/h) 150 cm³/s
+RAW_FEED_FLUX_M3H = 300.00 # (m³/h) 150 cm³/s
 
 # [MODIFIED] N2, O2, CO2 순서에 맞게 기본 조성 변경
 RAW_FEED_COMP = np.array([0.807, 0.107, 0.086]) # 3성분 기준 (N2, O2, CO2 순서)
 
-AREA_LIST_M2 = [5.0, 5.0, 5.0, 5.0] # 4스테이지 기준 (m²)
+AREA_LIST_M2 = [600.0, 400.0, 300.0, 200.0] # 4스테이지 기준 (m²)
 
 # ==================================================================
 # 2. MembraneStage 클래스 (수정 없음)
@@ -406,4 +406,5 @@ if run_button:
     except Exception as e:
         st.error(f"스크립트 실행 중 오류가 발생했습니다:")
         st.exception(e)
+
 
