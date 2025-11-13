@@ -19,22 +19,23 @@ CM3S_TO_M3H = 3600.0 / 1_000_000.0  # 1 cm³/s = 0.0036 m³/h
 M2_TO_CM2 = 10000.0  # 1 m² = 10000 cm²
 CM2_TO_M2 = 1.0 / M2_TO_CM2  # 1 cm² = 0.0001 m²
 
-# [수정] P와 delta를 L (Permeance = P/delta)로 통합
-# 기존 P: [0.073e-12, 0.2178e-12, 0.2178e-12]
-# 기존 delta: 0.2e-6
-# L = P/delta -> [3.65e-07, 1.089e-06, 1.089e-06]
+# [수정] UI 기본값에서 L(투과율)을 분리함 (각 스테이지에서 직접 입력)
 PROCESS_PARAMS_VOL = {
-    "L": np.array([3.65e-07, 1.089e-06, 1.089e-06]),  # (cm³)/(cm²·s·atm)
+    # "L" 값을 여기에서 스테이지별 입력으로 이동
     "p_u_default": 1.00,  # (bar) 10 atm
     "p_p_default": 1.00,  # (bar) 1 atm
 }
+# [수정] 스테이지별 L 값의 기본값으로 사용할 값
+DEFAULT_L = np.array([3.65e-07, 1.089e-06, 1.089e-06]) # (cm³)/(cm²·s·atm)
+
 RAW_FEED_FLUX_M3H = 300.00  # (m³/h) 150 cm³/s
 
 RAW_FEED_COMP = np.array([0.807, 0.107, 0.086])  # 3성분 기준 (N2, O2, CO2 순서)
 AREA_LIST_M2 = [600.0, 400.0, 300.0, 200.0]  # 4스테이지 기준 (m²)
 
 # ==================================================================
-# 2. MembraneStage 클래스 (수정됨)
+# 2. MembraneStage 클래스 (수정 없음)
+# (이 클래스는 이미 stage.run(params)로 개별 파라미터를 받게 되어있음)
 # ==================================================================
 class MembraneStage:
     """
@@ -54,7 +55,6 @@ class MembraneStage:
 
     def _calc_yi_system(self, x, params):
         n_comp = len(x)
-        # [수정] P -> L
         L, p_u, p_p = params["L"], params["p_u"], params["p_p"]
         x_safe = np.clip(x, 1e-12, 1.0)
 
@@ -62,7 +62,6 @@ class MembraneStage:
             yi_safe = np.clip(yi, 1e-12, 1.0)
             eqs = []
             for i in range(n_comp - 1):
-                # [수정] P[i] -> L[i], P[i+1] -> L[i+1]
                 driving_force_i = L[i] * (p_u * x_safe[i] - p_p * yi_safe[i])
                 driving_force_j = L[i + 1] * (p_u * x_safe[i + 1] - p_p * yi_safe[i + 1])
                 eqs.append(yi_safe[i] * driving_force_j - yi_safe[i + 1] * driving_force_i)
@@ -74,7 +73,6 @@ class MembraneStage:
         return np.clip(yi_sol, 1e-10, 1.0)
 
     def _odes(self, A, y_state, params):
-        # [수정] P -> L
         n_comp = len(params["L"])
         x = y_state[:n_comp]
         Lu = y_state[n_comp]
@@ -83,10 +81,7 @@ class MembraneStage:
         x /= np.sum(x)
 
         yi = self._calc_yi_system(x, params)
-
-        # [수정] (params["P"] / params["delta"]) -> params["L"]
         Ji = params["L"] * (params["p_u"] * x - params["p_p"] * yi)
-
         Ji = np.maximum(Ji, 0)
         dLu_dA = -np.sum(Ji)
 
@@ -109,7 +104,6 @@ class MembraneStage:
         self.feed_flux = feed_flux
         self.feed_comp = feed_comp
         n_comp = len(feed_comp)
-
         y_state0 = np.hstack((feed_comp, feed_flux))
 
         sol = solve_ivp(
@@ -148,6 +142,7 @@ class MembraneStage:
 
 # ==================================================================
 # 3. Process 클래스 (수정 없음)
+# (이 클래스는 이미 params_list로 개별 파라미터 리스트를 받게 되어있음)
 # ==================================================================
 class Process:
     def __init__(self, params_list, area_list, stp_molar_volume=22414.0):
@@ -174,7 +169,6 @@ class Process:
 
     def run_with_recycle(self, raw_feed_flux, raw_feed_comp, max_iterations=50, tolerance=1e-6):
         n_comp = len(raw_feed_comp)
-
         recycled_ret_3 = {'flux': 0.0, 'comp': np.zeros(n_comp)}
         recycled_ret_4 = {'flux': 0.0, 'comp': np.zeros(n_comp)}
 
@@ -189,18 +183,19 @@ class Process:
             stage1_feed_flux, stage1_feed_comp = self._calculate_mixed_feed(
                 raw_feed_flux, raw_feed_comp, recycled_ret_3, recycled_ret_4
             )
-
             current_feed_flux = stage1_feed_flux
             current_feed_comp = stage1_feed_comp
-
             current_stages = []
+
             try:
                 if len(self.area_list) < 4:
                     raise ValueError("Area 리스트는 최소 4개여야 합니다 (현재 4-stage 재활용 로직).")
 
                 for j, area_target in enumerate(self.area_list):
                     stage = MembraneStage(f"Stage-{j + 1}")
-                    stage_params = self.params_list[j]
+                    # [수정 없음] Process는 이미 params_list[j]에서 
+                    # 해당 스테이지(j)의 파라미터를 가져와 사용 중
+                    stage_params = self.params_list[j] 
                     stage.run(current_feed_flux, current_feed_comp, area_target, stage_params)
 
                     current_stages.append(stage)
@@ -251,18 +246,13 @@ COMP_NAMES_FIXED = ['N2', 'O2', 'CO2']
 # --- 입력창 (사이드바) ---
 with st.sidebar:
     st.header("1. 공정 파라미터 (공통)")
-
-    # [삭제] 막 두께(delta) 입력 삭제
-    # delta = st.number_input("막 두께 (delta, cm)", value=PROCESS_PARAMS_VOL["delta"], format="%.2e")
-
-    # [수정] P (투과도) -> L (투과율)
-    st.subheader("막 투과율 (L = P/delta)")
-    # [수정] 단위 변경 (cm³·cm -> cm³)
-    st.caption(f"단위: cm³/(cm²·s·atm)")
-    # [수정] 변수명 p_ -> l_ , 기본값 변경 (PROCESS_PARAMS_VOL["L"])
-    l_1 = st.number_input(f"L for {COMP_NAMES_FIXED[0]}", value=PROCESS_PARAMS_VOL["L"][0], format="%.4e")
-    l_2 = st.number_input(f"L for {COMP_NAMES_FIXED[1]}", value=PROCESS_PARAMS_VOL["L"][1], format="%.4e")
-    l_3 = st.number_input(f"L for {COMP_NAMES_FIXED[2]}", value=PROCESS_PARAMS_VOL["L"][2], format="%.4e")
+    
+    # [삭제] 공통 투과율 입력 삭제
+    # st.subheader("막 투과율 (L = P/delta)")
+    # st.caption(f"단위: cm³/(cm²·s·atm)")
+    # l_1 = ...
+    # l_2 = ...
+    # l_3 = ...
 
     st.header("2. 초기 원료 (Raw Feed)")
     feed_flux_m3h = st.number_input("총 유량 (m³/h)", value=RAW_FEED_FLUX_M3H, format="%.2f")
@@ -277,29 +267,46 @@ with st.sidebar:
     p_u_default = PROCESS_PARAMS_VOL["p_u_default"]
     p_p_default = PROCESS_PARAMS_VOL["p_p_default"]
 
-    # Stage 1
+    # --- [수정] Stage 1 ---
     st.subheader("Stage 1")
     area_1 = st.number_input("S1 Area (m²)", value=AREA_LIST_M2[0], format="%.4f", key="a1")
     p_u_1 = st.number_input("S1 Upstream (p_u, bar)", value=p_u_default, key="pu1")
     p_p_1 = st.number_input("S1 Permeate (p_p, bar)", value=p_p_default, key="pp1")
+    st.caption("S1 막 투과율 (L, cm³/(cm²·s·atm))")
+    l1_1 = st.number_input(f"L for {COMP_NAMES_FIXED[0]}", value=DEFAULT_L[0], format="%.4e", key="l11")
+    l1_2 = st.number_input(f"L for {COMP_NAMES_FIXED[1]}", value=DEFAULT_L[1], format="%.4e", key="l12")
+    l1_3 = st.number_input(f"L for {COMP_NAMES_FIXED[2]}", value=DEFAULT_L[2], format="%.4e", key="l13")
 
-    # Stage 2
+
+    # --- [수정] Stage 2 ---
     st.subheader("Stage 2")
     area_2 = st.number_input("S2 Area (m²)", value=AREA_LIST_M2[1], format="%.4f", key="a2")
     p_u_2 = st.number_input("S2 Upstream (p_u, bar)", value=p_u_default, key="pu2")
     p_p_2 = st.number_input("S2 Permeate (p_p, bar)", value=p_p_default, key="pp2")
+    st.caption("S2 막 투과율 (L, cm³/(cm²·s·atm))")
+    l2_1 = st.number_input(f"L for {COMP_NAMES_FIXED[0]}", value=DEFAULT_L[0], format="%.4e", key="l21")
+    l2_2 = st.number_input(f"L for {COMP_NAMES_FIXED[1]}", value=DEFAULT_L[1], format="%.4e", key="l22")
+    l2_3 = st.number_input(f"L for {COMP_NAMES_FIXED[2]}", value=DEFAULT_L[2], format="%.4e", key="l23")
 
-    # Stage 3
+    # --- [수정] Stage 3 ---
     st.subheader("Stage 3")
     area_3 = st.number_input("S3 Area (m²)", value=AREA_LIST_M2[2], format="%.4f", key="a3")
     p_u_3 = st.number_input("S3 Upstream (p_u, bar)", value=p_u_default, key="pu3")
     p_p_3 = st.number_input("S3 Permeate (p_p, bar)", value=p_p_default, key="pp3")
+    st.caption("S3 막 투과율 (L, cm³/(cm²·s·atm))")
+    l3_1 = st.number_input(f"L for {COMP_NAMES_FIXED[0]}", value=DEFAULT_L[0], format="%.4e", key="l31")
+    l3_2 = st.number_input(f"L for {COMP_NAMES_FIXED[1]}", value=DEFAULT_L[1], format="%.4e", key="l32")
+    l3_3 = st.number_input(f"L for {COMP_NAMES_FIXED[2]}", value=DEFAULT_L[2], format="%.4e", key="l33")
 
-    # Stage 4
+    # --- [수정] Stage 4 ---
     st.subheader("Stage 4")
     area_4 = st.number_input("S4 Area (m²)", value=AREA_LIST_M2[3], format="%.4f", key="a4")
     p_u_4 = st.number_input("S4 Upstream (p_u, bar)", value=p_u_default, key="pu4")
     p_p_4 = st.number_input("S4 Permeate (p_p, bar)", value=p_p_default, key="pp4")
+    st.caption("S4 막 투과율 (L, cm³/(cm²·s·atm))")
+    l4_1 = st.number_input(f"L for {COMP_NAMES_FIXED[0]}", value=DEFAULT_L[0], format="%.4e", key="l41")
+    l4_2 = st.number_input(f"L for {COMP_NAMES_FIXED[1]}", value=DEFAULT_L[1], format="%.4e", key="l42")
+    l4_3 = st.number_input(f"L for {COMP_NAMES_FIXED[2]}", value=DEFAULT_L[2], format="%.4e", key="l43")
 
     run_button = st.button("🚀 시뮬레이션 실행")
 
@@ -315,15 +322,20 @@ if run_button:
         p_u_list_bar = [p_u_1, p_u_2, p_u_3, p_u_4]
         p_p_list_bar = [p_p_1, p_p_2, p_p_3, p_p_4]
 
-        # [수정] p_in -> l_in
-        l_in = np.array([l_1, l_2, l_3])
+        # [수정] 스테이지별 L 값을 리스트로 묶기
+        l_inputs_list_vol = [
+            np.array([l1_1, l1_2, l1_3]), # Stage 1 L 값
+            np.array([l2_1, l2_2, l2_3]), # Stage 2 L 값
+            np.array([l3_1, l3_2, l3_3]), # Stage 3 L 값
+            np.array([l4_1, l4_2, l4_3])  # Stage 4 L 값
+        ]
+        
         raw_feed_comp_in = np.array([comp_1, comp_2, comp_3])
         comp_names_in = COMP_NAMES_FIXED
 
-        # [수정] p_in -> l_in
-        if len(l_in) != len(raw_feed_comp_in):
-            st.error(f"오류: 막 투과율 L 갯수({len(l_in)})와 초기 조성 갯수({len(raw_feed_comp_in)})가 일치하지 않습니다.")
-            st.stop()
+        # [삭제] 공통 l_in 관련 로직 삭제
+        # l_in = np.array([l_1, l_2, l_3])
+        # if len(l_in) != len(raw_feed_comp_in): ...
 
         if len(comp_names_in) != len(raw_feed_comp_in):
             st.error(f"오류: 고정된 성분 이름 갯수({len(comp_names_in)})와 초기 조성 갯수({len(raw_feed_comp_in)})가 일치하지 않습니다.")
@@ -337,22 +349,23 @@ if run_button:
         # --- 2. 파라미터 준비 ---
 
         process_params_list_mol = []
-        # [수정] p_mol -> L_mol
-        L_mol = l_in / STP_MOLAR_VOLUME
-
-        # [삭제] delta_in 삭제
-        # delta_in = delta
-
+        
+        # [수정] 스테이지별 L 값을 개별적으로 변환하여 리스트 생성
         for i in range(4):
+            # i번째 스테이지의 L 값(vol단위)을 mol단위로 변환
+            L_mol = l_inputs_list_vol[i] / STP_MOLAR_VOLUME 
+
             stage_params = {
-                # [수정] "P": p_mol -> "L": L_mol
-                "L": L_mol,
-                # [삭제] "delta": delta_in 삭제
-                # "delta": delta_in,
+                "L": L_mol, # 스테이지별 L_mol 적용
                 "p_u": p_u_list_bar[i] * BAR_TO_ATM,  # bar -> atm 환산
                 "p_p": p_p_list_bar[i] * BAR_TO_ATM,  # bar -> atm 환산
             }
             process_params_list_mol.append(stage_params)
+        
+        # [수정] 기존 공통 L_mol 사용 로직 삭제
+        # L_mol = l_in / STP_MOLAR_VOLUME
+        # for i in range(4):
+        #    stage_params = { ... "L": L_mol ... }
 
         area_list_in_cm2 = [a * M2_TO_CM2 for a in area_list_in_m2]
 
@@ -362,6 +375,7 @@ if run_button:
         # --- 3. 시뮬레이션 실행 ---
         main_area.subheader("2. ⚙️ 시뮬레이션 실행 (재활용 루프)")
 
+        # [수정 없음] Process 클래스는 이미 개별 파라미터 리스트(process_params_list_mol)를 받음
         membrane_process = Process(process_params_list_mol, area_list_in_cm2, stp_molar_volume=STP_MOLAR_VOLUME)
 
         success = membrane_process.run_with_recycle(
