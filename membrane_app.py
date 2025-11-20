@@ -19,29 +19,31 @@ CM3S_TO_M3H = 3600.0 / 1_000_000.0  # 1 cm³/s = 0.0036 m³/h
 M2_TO_CM2 = 10000.0  # 1 m² = 10000 cm²
 CM2_TO_M2 = 1.0 / M2_TO_CM2  # 1 cm² = 0.0001 m²
 
-# [수정] UI 기본값에서 L(투과율)을 분리함 (각 스테이지에서 직접 입력)
-PROCESS_PARAMS_VOL = {
-    # "L" 값을 여기에서 스테이지별 입력으로 이동
-    "p_u_default": 1.00,  # (bar) 10 atm
-    "p_p_default": 1.00,  # (bar) 1 atm
-}
-# [수정] 스테이지별 L 값의 기본값으로 사용할 값
-DEFAULT_L = np.array([3.65e-07, 1.089e-06, 1.089e-06]) # (cm³)/(cm²·s·atm)
+# [Unit Change] GPU 변환 계수 추가
+# 1 GPU = 10^-6 cm³(STP) / (cm² · s · cmHg)
+# 1 atm = 76 cmHg 이므로, driving force가 1 atm일 때의 flux는 1 cmHg일 때보다 76배 큼.
+# 따라서 1 GPU = 76 * 10^-6 cm³(STP) / (cm² · s · atm)
+GPU_TO_STD_UNITS = 1e-6 * 76.0 
 
-RAW_FEED_FLUX_M3H = 300.00  # (m³/h) 150 cm³/s
+PROCESS_PARAMS_VOL = {
+    "p_u_default": 1.00,  # (bar)
+    "p_p_default": 1.00,  # (bar)
+}
+
+# [Unit Change] 기본값도 GPU 단위로 변경 (예시값: 50, 200, 100 GPU 등)
+# 기존의 매우 작은 값(e-7) 대신, 사용자가 보기 편한 GPU 단위(1~1000 범위)로 임시 설정했습니다.
+# 필요에 따라 이 값을 수정하세요.
+DEFAULT_L_GPU = np.array([100.0, 500.0, 200.0]) 
+
+RAW_FEED_FLUX_M3H = 300.00  # (m³/h) 
 
 RAW_FEED_COMP = np.array([0.807, 0.107, 0.086])  # 3성분 기준 (N2, O2, CO2 순서)
 AREA_LIST_M2 = [600.0, 400.0, 300.0, 200.0]  # 4스테이지 기준 (m²)
 
 # ==================================================================
-# 2. MembraneStage 클래스 (수정 없음)
-# (이 클래스는 이미 stage.run(params)로 개별 파라미터를 받게 되어있음)
+# 2. MembraneStage 클래스 (변경 없음)
 # ==================================================================
 class MembraneStage:
-    """
-    단일 멤브레인 스테이지의 거동을 계산하고 상태를 저장하는 클래스.
-    """
-
     def __init__(self, name):
         self.name = name
         self.area = 0.0
@@ -141,8 +143,7 @@ class MembraneStage:
 
 
 # ==================================================================
-# 3. Process 클래스 (수정 없음)
-# (이 클래스는 이미 params_list로 개별 파라미터 리스트를 받게 되어있음)
+# 3. Process 클래스 (변경 없음)
 # ==================================================================
 class Process:
     def __init__(self, params_list, area_list, stp_molar_volume=22414.0):
@@ -193,8 +194,6 @@ class Process:
 
                 for j, area_target in enumerate(self.area_list):
                     stage = MembraneStage(f"Stage-{j + 1}")
-                    # [수정 없음] Process는 이미 params_list[j]에서 
-                    # 해당 스테이지(j)의 파라미터를 가져와 사용 중
                     stage_params = self.params_list[j] 
                     stage.run(current_feed_flux, current_feed_comp, area_target, stage_params)
 
@@ -234,11 +233,11 @@ class Process:
 
 
 # ==================================================================
-# 4. Streamlit UI 및 실행 로직 (수정됨)
+# 4. Streamlit UI 및 실행 로직
 # ==================================================================
 
 st.set_page_config(layout="wide")
-st.title("🧪 4-Stage Membrane Process Simulator")
+st.title("🧪 4-Stage Membrane Simulator (GPU Unit)")
 
 # 고정된 성분 이름 리스트
 COMP_NAMES_FIXED = ['N2', 'O2', 'CO2']
@@ -247,13 +246,6 @@ COMP_NAMES_FIXED = ['N2', 'O2', 'CO2']
 with st.sidebar:
     st.header("1. 공정 파라미터 (공통)")
     
-    # [삭제] 공통 투과율 입력 삭제
-    # st.subheader("막 투과율 (L = P/delta)")
-    # st.caption(f"단위: cm³/(cm²·s·atm)")
-    # l_1 = ...
-    # l_2 = ...
-    # l_3 = ...
-
     st.header("2. 초기 원료 (Raw Feed)")
     feed_flux_m3h = st.number_input("총 유량 (m³/h)", value=RAW_FEED_FLUX_M3H, format="%.2f")
 
@@ -263,6 +255,7 @@ with st.sidebar:
     comp_3 = st.number_input(f"{COMP_NAMES_FIXED[2]} (Comp 3)", value=RAW_FEED_COMP[2], format="%.4f")
 
     st.header("3. 스테이지별 파라미터")
+    st.info("💡 투과율(Permeance) 단위는 **GPU**입니다.")
 
     p_u_default = PROCESS_PARAMS_VOL["p_u_default"]
     p_p_default = PROCESS_PARAMS_VOL["p_p_default"]
@@ -272,10 +265,10 @@ with st.sidebar:
     area_1 = st.number_input("S1 Area (m²)", value=AREA_LIST_M2[0], format="%.4f", key="a1")
     p_u_1 = st.number_input("S1 Upstream (p_u, bar)", value=p_u_default, key="pu1")
     p_p_1 = st.number_input("S1 Permeate (p_p, bar)", value=p_p_default, key="pp1")
-    st.caption("S1 막 투과율 (L, cm³/(cm²·s·atm))")
-    l1_1 = st.number_input(f"L for {COMP_NAMES_FIXED[0]}", value=DEFAULT_L[0], format="%.4e", key="l11")
-    l1_2 = st.number_input(f"L for {COMP_NAMES_FIXED[1]}", value=DEFAULT_L[1], format="%.4e", key="l12")
-    l1_3 = st.number_input(f"L for {COMP_NAMES_FIXED[2]}", value=DEFAULT_L[2], format="%.4e", key="l13")
+    st.caption("S1 Permeance (GPU)")
+    l1_1 = st.number_input(f"GPU for {COMP_NAMES_FIXED[0]}", value=DEFAULT_L_GPU[0], format="%.1f", key="l11")
+    l1_2 = st.number_input(f"GPU for {COMP_NAMES_FIXED[1]}", value=DEFAULT_L_GPU[1], format="%.1f", key="l12")
+    l1_3 = st.number_input(f"GPU for {COMP_NAMES_FIXED[2]}", value=DEFAULT_L_GPU[2], format="%.1f", key="l13")
 
 
     # --- [수정] Stage 2 ---
@@ -283,30 +276,30 @@ with st.sidebar:
     area_2 = st.number_input("S2 Area (m²)", value=AREA_LIST_M2[1], format="%.4f", key="a2")
     p_u_2 = st.number_input("S2 Upstream (p_u, bar)", value=p_u_default, key="pu2")
     p_p_2 = st.number_input("S2 Permeate (p_p, bar)", value=p_p_default, key="pp2")
-    st.caption("S2 막 투과율 (L, cm³/(cm²·s·atm))")
-    l2_1 = st.number_input(f"L for {COMP_NAMES_FIXED[0]}", value=DEFAULT_L[0], format="%.4e", key="l21")
-    l2_2 = st.number_input(f"L for {COMP_NAMES_FIXED[1]}", value=DEFAULT_L[1], format="%.4e", key="l22")
-    l2_3 = st.number_input(f"L for {COMP_NAMES_FIXED[2]}", value=DEFAULT_L[2], format="%.4e", key="l23")
+    st.caption("S2 Permeance (GPU)")
+    l2_1 = st.number_input(f"GPU for {COMP_NAMES_FIXED[0]}", value=DEFAULT_L_GPU[0], format="%.1f", key="l21")
+    l2_2 = st.number_input(f"GPU for {COMP_NAMES_FIXED[1]}", value=DEFAULT_L_GPU[1], format="%.1f", key="l22")
+    l2_3 = st.number_input(f"GPU for {COMP_NAMES_FIXED[2]}", value=DEFAULT_L_GPU[2], format="%.1f", key="l23")
 
     # --- [수정] Stage 3 ---
     st.subheader("Stage 3")
     area_3 = st.number_input("S3 Area (m²)", value=AREA_LIST_M2[2], format="%.4f", key="a3")
     p_u_3 = st.number_input("S3 Upstream (p_u, bar)", value=p_u_default, key="pu3")
     p_p_3 = st.number_input("S3 Permeate (p_p, bar)", value=p_p_default, key="pp3")
-    st.caption("S3 막 투과율 (L, cm³/(cm²·s·atm))")
-    l3_1 = st.number_input(f"L for {COMP_NAMES_FIXED[0]}", value=DEFAULT_L[0], format="%.4e", key="l31")
-    l3_2 = st.number_input(f"L for {COMP_NAMES_FIXED[1]}", value=DEFAULT_L[1], format="%.4e", key="l32")
-    l3_3 = st.number_input(f"L for {COMP_NAMES_FIXED[2]}", value=DEFAULT_L[2], format="%.4e", key="l33")
+    st.caption("S3 Permeance (GPU)")
+    l3_1 = st.number_input(f"GPU for {COMP_NAMES_FIXED[0]}", value=DEFAULT_L_GPU[0], format="%.1f", key="l31")
+    l3_2 = st.number_input(f"GPU for {COMP_NAMES_FIXED[1]}", value=DEFAULT_L_GPU[1], format="%.1f", key="l32")
+    l3_3 = st.number_input(f"GPU for {COMP_NAMES_FIXED[2]}", value=DEFAULT_L_GPU[2], format="%.1f", key="l33")
 
     # --- [수정] Stage 4 ---
     st.subheader("Stage 4")
     area_4 = st.number_input("S4 Area (m²)", value=AREA_LIST_M2[3], format="%.4f", key="a4")
     p_u_4 = st.number_input("S4 Upstream (p_u, bar)", value=p_u_default, key="pu4")
     p_p_4 = st.number_input("S4 Permeate (p_p, bar)", value=p_p_default, key="pp4")
-    st.caption("S4 막 투과율 (L, cm³/(cm²·s·atm))")
-    l4_1 = st.number_input(f"L for {COMP_NAMES_FIXED[0]}", value=DEFAULT_L[0], format="%.4e", key="l41")
-    l4_2 = st.number_input(f"L for {COMP_NAMES_FIXED[1]}", value=DEFAULT_L[1], format="%.4e", key="l42")
-    l4_3 = st.number_input(f"L for {COMP_NAMES_FIXED[2]}", value=DEFAULT_L[2], format="%.4e", key="l43")
+    st.caption("S4 Permeance (GPU)")
+    l4_1 = st.number_input(f"GPU for {COMP_NAMES_FIXED[0]}", value=DEFAULT_L_GPU[0], format="%.1f", key="l41")
+    l4_2 = st.number_input(f"GPU for {COMP_NAMES_FIXED[1]}", value=DEFAULT_L_GPU[1], format="%.1f", key="l42")
+    l4_3 = st.number_input(f"GPU for {COMP_NAMES_FIXED[2]}", value=DEFAULT_L_GPU[2], format="%.1f", key="l43")
 
     run_button = st.button("🚀 시뮬레이션 실행")
 
@@ -322,20 +315,16 @@ if run_button:
         p_u_list_bar = [p_u_1, p_u_2, p_u_3, p_u_4]
         p_p_list_bar = [p_p_1, p_p_2, p_p_3, p_p_4]
 
-        # [수정] 스테이지별 L 값을 리스트로 묶기
-        l_inputs_list_vol = [
-            np.array([l1_1, l1_2, l1_3]), # Stage 1 L 값
-            np.array([l2_1, l2_2, l2_3]), # Stage 2 L 값
-            np.array([l3_1, l3_2, l3_3]), # Stage 3 L 값
-            np.array([l4_1, l4_2, l4_3])  # Stage 4 L 값
+        # [수정] 스테이지별 L값 (GPU 단위 입력값)
+        l_inputs_list_gpu = [
+            np.array([l1_1, l1_2, l1_3]), 
+            np.array([l2_1, l2_2, l2_3]), 
+            np.array([l3_1, l3_2, l3_3]), 
+            np.array([l4_1, l4_2, l4_3])  
         ]
         
         raw_feed_comp_in = np.array([comp_1, comp_2, comp_3])
         comp_names_in = COMP_NAMES_FIXED
-
-        # [삭제] 공통 l_in 관련 로직 삭제
-        # l_in = np.array([l_1, l_2, l_3])
-        # if len(l_in) != len(raw_feed_comp_in): ...
 
         if len(comp_names_in) != len(raw_feed_comp_in):
             st.error(f"오류: 고정된 성분 이름 갯수({len(comp_names_in)})와 초기 조성 갯수({len(raw_feed_comp_in)})가 일치하지 않습니다.")
@@ -350,22 +339,21 @@ if run_button:
 
         process_params_list_mol = []
         
-        # [수정] 스테이지별 L 값을 개별적으로 변환하여 리스트 생성
+        # [Unit Change] GPU -> Standard Unit -> Molar Unit 변환 및 적용
         for i in range(4):
-            # i번째 스테이지의 L 값(vol단위)을 mol단위로 변환
-            L_mol = l_inputs_list_vol[i] / STP_MOLAR_VOLUME 
+            # 1. GPU 값을 내부 계산 단위인 cm3/(cm2 s atm)으로 변환
+            L_std_vol = l_inputs_list_gpu[i] * GPU_TO_STD_UNITS
+            
+            # 2. 부피 Flux를 몰 Flux로 변환 (mol/(cm2 s atm))
+            L_mol = L_std_vol / STP_MOLAR_VOLUME 
 
             stage_params = {
-                "L": L_mol, # 스테이지별 L_mol 적용
+                "L": L_mol, 
                 "p_u": p_u_list_bar[i] * BAR_TO_ATM,  # bar -> atm 환산
                 "p_p": p_p_list_bar[i] * BAR_TO_ATM,  # bar -> atm 환산
             }
             process_params_list_mol.append(stage_params)
         
-        # [수정] 기존 공통 L_mol 사용 로직 삭제
-        # L_mol = l_in / STP_MOLAR_VOLUME
-        # for i in range(4):
-        #    stage_params = { ... "L": L_mol ... }
 
         area_list_in_cm2 = [a * M2_TO_CM2 for a in area_list_in_m2]
 
@@ -375,7 +363,6 @@ if run_button:
         # --- 3. 시뮬레이션 실행 ---
         main_area.subheader("2. ⚙️ 시뮬레이션 실행 (재활용 루프)")
 
-        # [수정 없음] Process 클래스는 이미 개별 파라미터 리스트(process_params_list_mol)를 받음
         membrane_process = Process(process_params_list_mol, area_list_in_cm2, stp_molar_volume=STP_MOLAR_VOLUME)
 
         success = membrane_process.run_with_recycle(
