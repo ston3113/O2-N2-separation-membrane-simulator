@@ -26,19 +26,19 @@ CM2_TO_M2 = 1.0 / M2_TO_CM2  # 1 cm² = 0.0001 m²
 GPU_TO_STD_UNITS = 1e-6 * 76.0 
 
 PROCESS_PARAMS_VOL = {
-    "p_u_default": 1.00,  # (bar)
-    "p_p_default": 1.00,  # (bar)
+    "p_u_default": 8.00,  # (bar)
+    "p_p_default": 0.80,  # (bar)
 }
 
 # [Unit Change] 기본값도 GPU 단위로 변경 (예시값: 50, 200, 100 GPU 등)
 # 기존의 매우 작은 값(e-7) 대신, 사용자가 보기 편한 GPU 단위(1~1000 범위)로 임시 설정했습니다.
 # 필요에 따라 이 값을 수정하세요.
-DEFAULT_L_GPU = np.array([100.0, 500.0, 200.0]) 
+DEFAULT_L_GPU = np.array([36.0, 146.0, 300.0]) 
 
 RAW_FEED_FLUX_M3H = 300.00  # (m³/h) 
 
 RAW_FEED_COMP = np.array([0.807, 0.107, 0.086])  # 3성분 기준 (N2, O2, CO2 순서)
-AREA_LIST_M2 = [600.0, 400.0, 300.0, 200.0]  # 4스테이지 기준 (m²)
+AREA_LIST_M2 = [100.0, 66.66, 50.0, 33.33]  # 4스테이지 기준 (m²)
 
 # ==================================================================
 # 2. MembraneStage 클래스 (변경 없음)
@@ -426,3 +426,4 @@ if run_button:
     except Exception as e:
         st.error(f"스크립트 실행 중 오류가 발생했습니다:")
         st.exception(e)
+
