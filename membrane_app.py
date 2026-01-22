@@ -7,7 +7,7 @@ import pandas as pd
 
 # --- 기본 상수 및 단위 환산 ---
 STP_MOLAR_VOLUME = 22414.0  
-STAGE_CUT_THRESHOLD = 0.7   # 스테이지 컷 경고 기준 (70%)
+STAGE_CUT_THRESHOLD = 0.3   # 스테이지 컷 경고 기준 (70%)
 
 BAR_TO_ATM = 0.986923
 ATM_TO_BAR = 1.01325
@@ -153,3 +153,4 @@ if run_btn:
         df = pd.DataFrame(res)
         def style_sc(val): return f'color: red; font-weight: bold' if isinstance(val, float) and val > STAGE_CUT_THRESHOLD else ''
         st.dataframe(df.style.format("{:.4f}", subset=df.columns[1:]).applymap(style_sc, subset=['Stage Cut (θ)']), use_container_width=True)
+
