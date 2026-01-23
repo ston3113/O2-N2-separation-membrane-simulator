@@ -19,9 +19,9 @@ GPU_TO_STD_UNITS = 1e-6 * 76.0
 
 PROCESS_PARAMS_VOL = {"p_u_default": 8.00, "p_p_default": 0.80}
 DEFAULT_L_GPU = np.array([36.0, 146.0, 300.0]) 
-RAW_FEED_FLUX_M3H = 300.00 
+RAW_FEED_FLUX_M3H = 200.00 
 RAW_FEED_COMP = np.array([0.807, 0.107, 0.086]) # N2, O2, CO2
-AREA_LIST_M2 = [100.0, 66.66, 50.0, 33.33]
+AREA_LIST_M2 = [10.0, 1, 0.1, 0.01]
 
 # ==================================================================
 # 2. MembraneStage 클래스
@@ -75,12 +75,12 @@ class MembraneStage:
         return True
 
 # ==================================================================
-# 3. Process 클래스 (4-Stage Recycle)
+# 3. Process 클래스 (로그 기능 복구됨)
 # ==================================================================
 class Process:
     def __init__(self, params_list, area_list):
         self.params_list, self.area_list, self.stages = params_list, area_list, []
-        self.log_widget = st.empty()
+        self.log_widget = st.empty() # 로그를 출력할 빈 공간
 
     def _calculate_mixed_feed(self, raw_flux, raw_comp, ret_3, ret_4):
         total_moles = (raw_flux * raw_comp) + (ret_3['flux'] * ret_3['comp']) + (ret_4['flux'] * ret_4['comp'])
@@ -90,17 +90,50 @@ class Process:
     def run_with_recycle(self, raw_flux, raw_comp):
         n_comp = len(raw_comp)
         r3, r4 = {'flux': 0.0, 'comp': np.zeros(n_comp)}, {'flux': 0.0, 'comp': np.zeros(n_comp)}
+        
+        # [LOG START]
+        log_output = "====== Recycle Process Simulation Start ======\n"
+        self.log_widget.text(log_output)
+        start_time = time.time()
+
         for i in range(50):
+            # [LOG ITERATION]
+            log_output += f"\n--- Iteration {i+1} ---\n"
+            self.log_widget.text(log_output)
+
             f_flux, f_comp = self._calculate_mixed_feed(raw_flux, raw_comp, r3, r4)
             curr_flux, curr_comp, current_stages = f_flux, f_comp, []
-            for j, area in enumerate(self.area_list):
-                s = MembraneStage(f"Stage-{j+1}")
-                s.run(curr_flux, curr_comp, area, self.params_list[j])
-                current_stages.append(s); curr_flux, curr_comp = s.permeate_flux, s.permeate_comp
+            
+            try:
+                for j, area in enumerate(self.area_list):
+                    s = MembraneStage(f"Stage-{j+1}")
+                    s.run(curr_flux, curr_comp, area, self.params_list[j])
+                    current_stages.append(s); curr_flux, curr_comp = s.permeate_flux, s.permeate_comp
+            except Exception as e:
+                log_output += f"ERROR: {e}\n"
+                self.log_widget.text(log_output)
+                return False
+
             n3, n4 = {'flux': current_stages[2].retentate_flux, 'comp': current_stages[2].retentate_comp}, {'flux': current_stages[3].retentate_flux, 'comp': current_stages[3].retentate_comp}
-            if (abs(r3['flux'] - n3['flux']) + abs(r4['flux'] - n4['flux'])) < 1e-6:
-                self.stages = current_stages; return True
+            error = abs(r3['flux'] - n3['flux']) + abs(r4['flux'] - n4['flux'])
+            
+            # [LOG ERROR]
+            log_output += f"Recycle Flux Error: {error:.2e}\n"
+            self.log_widget.text(log_output)
+
+            if error < 1e-6:
+                self.stages = current_stages
+                end_time = time.time()
+                # [LOG SUCCESS]
+                log_output += f"\nSUCCESS: Converged after {i+1} iterations.\n"
+                log_output += f"====== Simulation Finished in {end_time - start_time:.4f} seconds ======"
+                self.log_widget.text(log_output)
+                return True
             r3, r4 = n3, n4
+        
+        # [LOG FAIL]
+        log_output += f"\nFAILURE: Did not converge after 50 iterations.\n"
+        self.log_widget.text(log_output)
         return False
 
 # ==================================================================
@@ -153,4 +186,3 @@ if run_btn:
         df = pd.DataFrame(res)
         def style_sc(val): return f'color: red; font-weight: bold' if isinstance(val, float) and val > STAGE_CUT_THRESHOLD else ''
         st.dataframe(df.style.format("{:.4f}", subset=df.columns[1:]).applymap(style_sc, subset=['Stage Cut (θ)']), use_container_width=True)
-
